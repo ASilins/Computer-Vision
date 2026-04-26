@@ -1,7 +1,12 @@
 import itertools
 import logging
-
 from det3d.utils.config_tool import get_downsample_factor
+from dotenv import load_dotenv
+
+load_dotenv()
+samples_per_gpu = int(os.getenv("GPU_SAMPLES", 2))
+workers_per_gpu = int(os.getenv("GPU_WORKERS", 4))
+gpu_ids = os.getenv("SELECTED_GPUS", "0")
 
 tasks = [
     dict(num_class=1, class_names=["car"]),
@@ -164,8 +169,8 @@ val_anno = "data/nuScenes/infos_val_10sweeps_withvelo_filter_True.pkl"
 test_anno = None
 
 data = dict(
-    samples_per_gpu=1,
-    workers_per_gpu=2,
+    samples_per_gpu=samples_per_gpu,
+    workers_per_gpu=workers_per_gpu,
     train=dict(
         type=dataset_type,
         root_path=data_root,
@@ -218,7 +223,7 @@ log_config = dict(
 # yapf:enable
 # runtime settings
 total_epochs = 20
-device_ids = range(1)
+device_ids = [int(x) for x in gpu_env.split(",") if x.strip() in ["0", "1"]]
 dist_params = dict(backend="nccl", init_method="env://")
 log_level = "INFO"
 work_dir = './work_dirs/{}/'.format(__file__[__file__.rfind('/') + 1:-3])
