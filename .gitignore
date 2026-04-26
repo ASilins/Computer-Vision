@@ -1,2 +1,20 @@
 data
 *.log
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual Environments
+venv/
+env/
+.env
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
