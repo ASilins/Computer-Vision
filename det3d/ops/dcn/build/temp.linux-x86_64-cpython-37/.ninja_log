@@ -1,0 +1,3 @@
+# ninja log v5
+1	9883	1776796852868130717	/home/cv29f26/Computer-Vision/det3d/ops/dcn/build/temp.linux-x86_64-cpython-37/src/deform_conv_cuda_kernel.o	a316ef61b475275
+1	10800	1776796853740129920	/home/cv29f26/Computer-Vision/det3d/ops/dcn/build/temp.linux-x86_64-cpython-37/src/deform_conv_cuda.o	5666843f3bf74a42

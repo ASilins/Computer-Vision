@@ -1,0 +1,5 @@
+# ninja log v5
+3	1666	1776796662828301919	/home/cv29f26/Computer-Vision/det3d/ops/iou3d_nms/build/temp.linux-x86_64-cpython-37/src/iou3d_nms_kernel.o	6278d9d101f3f9d
+2	8010	1776796669172296297	/home/cv29f26/Computer-Vision/det3d/ops/iou3d_nms/build/temp.linux-x86_64-cpython-37/src/iou3d_cpu.o	a1924083def66e03
+3	8198	1776796669356296133	/home/cv29f26/Computer-Vision/det3d/ops/iou3d_nms/build/temp.linux-x86_64-cpython-37/src/iou3d_nms.o	f5d5ce7a772ac0a2
+3	13073	1776796674228291810	/home/cv29f26/Computer-Vision/det3d/ops/iou3d_nms/build/temp.linux-x86_64-cpython-37/src/iou3d_nms_api.o	629ee59c12c50298
