@@ -17,5 +17,8 @@ env/
 # Distribution / packaging
 build/
 dist/
+work_dirs/
+
 *.egg-info/
 *.log.json
+nohup.out
