@@ -1,4 +1,3 @@
-import os
 import itertools
 import logging
 from det3d.utils.config_tool import get_downsample_factor
@@ -94,12 +93,12 @@ test_cfg = dict(
 # dataset settings
 dataset_type = "NuScenesDataset"
 nsweeps = 10
-data_root = os.environ.get("NUSCENES_DATA_ROOT", "data/nuScenes")
+data_root = "data/nuScenes"
 
 db_sampler = dict(
     type="GT-AUG",
     enable=False,
-    db_info_path=f"{data_root}/dbinfos_train_10sweeps_withvelo.pkl",
+    db_info_path="data/nuScenes/dbinfos_train_10sweeps_withvelo.pkl",
     sample_groups=[
         dict(car=2),
         dict(truck=3),
@@ -170,9 +169,9 @@ test_pipeline = [
     dict(type="Reformat"),
 ]
 
-train_anno = f"{data_root}/infos_train_10sweeps_withvelo_filter_True.pkl"
+train_anno = "{data_root}/infos_train_10sweeps_withvelo_filter_True_subset_10.pkl"
 val_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True.pkl"
-test_anno = None
+test_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True.pkl"
 
 data = dict(
     samples_per_gpu=samples_per_gpu,

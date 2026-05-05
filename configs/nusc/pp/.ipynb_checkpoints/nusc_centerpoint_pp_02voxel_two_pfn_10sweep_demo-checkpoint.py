@@ -1,18 +1,7 @@
-import os
 import itertools
 import logging
+
 from det3d.utils.config_tool import get_downsample_factor
-import os
-from dotenv import load_dotenv
-
-print(f"Found ENV: {load_dotenv()}")
-samples_per_gpu = int(os.getenv("GPU_SAMPLES", 2))
-workers_per_gpu = int(os.getenv("GPU_WORKERS", 4))
-gpu_ids = os.getenv("SELECTED_GPUS", "0")
-
-print(f"Samples per gpu: {samples_per_gpu}")
-print(f"Workers per gpu: {workers_per_gpu}")
-print(f"Using GPUs: {gpu_ids}")
 
 tasks = [
     dict(num_class=1, class_names=["car"]),
@@ -94,12 +83,12 @@ test_cfg = dict(
 # dataset settings
 dataset_type = "NuScenesDataset"
 nsweeps = 10
-data_root = os.environ.get("NUSCENES_DATA_ROOT", "data/nuScenes")
+data_root = "data/nuScenes"
 
 db_sampler = dict(
     type="GT-AUG",
     enable=False,
-    db_info_path=f"{data_root}/dbinfos_train_10sweeps_withvelo.pkl",
+    db_info_path="data/nuScenes/dbinfos_train_10sweeps_withvelo.pkl",
     sample_groups=[
         dict(car=2),
         dict(truck=3),
@@ -137,7 +126,7 @@ train_preprocessor = dict(
     shuffle_points=True,
     global_rot_noise=[-0.3925, 0.3925],
     global_scale_noise=[0.95, 1.05],
-    db_sampler=None,
+    db_sampler=db_sampler,
     class_names=class_names,
 )
 
@@ -170,13 +159,13 @@ test_pipeline = [
     dict(type="Reformat"),
 ]
 
-train_anno = f"{data_root}/infos_train_10sweeps_withvelo_filter_True.pkl"
-val_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True.pkl"
+train_anno = "demo/nuScenes/demo_infos.pkl"
+val_anno = "demo/nuScenes/demo_infos.pkl"
 test_anno = None
 
 data = dict(
-    samples_per_gpu=samples_per_gpu,
-    workers_per_gpu=workers_per_gpu,
+    samples_per_gpu=4,
+    workers_per_gpu=8,
     train=dict(
         type=dataset_type,
         root_path=data_root,
@@ -229,7 +218,7 @@ log_config = dict(
 # yapf:enable
 # runtime settings
 total_epochs = 20
-device_ids = [int(x) for x in gpu_ids.split(",") if x.strip() in ["0", "1"]]
+device_ids = range(8)
 dist_params = dict(backend="nccl", init_method="env://")
 log_level = "INFO"
 work_dir = './work_dirs/{}/'.format(__file__[__file__.rfind('/') + 1:-3])
