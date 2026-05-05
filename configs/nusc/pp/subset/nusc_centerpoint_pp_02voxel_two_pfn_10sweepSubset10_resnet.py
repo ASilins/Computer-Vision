@@ -51,10 +51,9 @@ model = dict(
         us_layer_strides=[0.5, 1, 2],
         us_num_filters=[128, 128, 128],
         num_input_features=64,
-        logger=logging.getLogger("RPN"),
+        logger=logging.getLogger("ResNetNeck"),
     ),
     bbox_head=dict(
-        # type='RPNHead',
         type="CenterHead",
         in_channels=sum([128, 128, 128]),
         tasks=tasks,
