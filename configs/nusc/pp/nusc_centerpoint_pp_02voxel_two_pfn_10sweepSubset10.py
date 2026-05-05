@@ -169,9 +169,9 @@ test_pipeline = [
     dict(type="Reformat"),
 ]
 
-train_anno = "data/nuScenes/infos_train_10sweeps_withvelo_filter_True_subset_10.pkl"
-val_anno = "data/nuScenes/infos_val_10sweeps_withvelo_filter_True_subset_10.pkl"
-test_anno = None
+train_anno = "{data_root}/infos_train_10sweeps_withvelo_filter_True_subset_10.pkl"
+val_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True.pkl"
+test_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True.pkl"
 
 data = dict(
     samples_per_gpu=samples_per_gpu,
