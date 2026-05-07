@@ -11,6 +11,56 @@ from torch.nn import functional as F
 from ..registry import BACKBONES, READERS
 from ..utils import build_norm_layer
 
+class MAPELayer(nn.Module):
+    """
+    Max-and-Attention Pillar Encoding (MAPE)
+    Based on the FastPillars (2023) architecture.
+    """
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        # Standard Point-wise Feature Extraction
+        self.linear = nn.Linear(in_channels, out_channels, bias=False)
+        self.norm = nn.BatchNorm1d(out_channels)
+        
+        # Attention Generation Branch
+        self.attention_fc = nn.Linear(out_channels, out_channels, bias=False)
+        self.attention_norm = nn.BatchNorm1d(out_channels)
+
+    def forward(self, inputs):
+        # inputs shape: [M, max_points_per_pillar, in_channels]
+        # M = total number of non-empty pillars
+        
+        # 1. Extract Point Features
+        x = self.linear(inputs)
+        
+        # Reshape for BatchNorm1d
+        M, num_points, C = x.shape
+        x = x.view(M * num_points, C).unsqueeze(-1)
+        x = self.norm(x)
+        x = x.view(M, num_points, C)
+        x = F.relu(x)
+        
+        # 2. Extract Global Geometric Context (Standard Max Pooling)
+        x_max = torch.max(x, dim=1, keepdim=True)[0]  # Shape: [M, 1, C]
+        
+        # 3. Generate Attention Weights
+        # Use the global feature to determine which channels matter most
+        attn_weights = self.attention_fc(x_max)
+        
+        # Reshape for BatchNorm
+        attn_weights = attn_weights.view(M, C).unsqueeze(-1)
+        attn_weights = self.attention_norm(attn_weights)
+        attn_weights = attn_weights.view(M, 1, C)
+        
+        # Sigmoid to scale weights between 0 and 1
+        attn_weights = torch.sigmoid(attn_weights)    # Shape: [M, 1, C]
+        
+        # 4. Attentive Fusion
+        # Multiply the original features by the attention weights, then pool
+        x_attended = x * attn_weights
+        out = torch.max(x_attended, dim=1)[0]         # Shape: [M, C]
+        
+        return out
 
 class PFNLayer(nn.Module):
     def __init__(self, in_channels, out_channels, norm_cfg=None, last_layer=False):
@@ -216,3 +266,101 @@ class PointPillarsScatter(nn.Module):
         # Undo the column stacking to final 4-dim tensor
         batch_canvas = batch_canvas.view(batch_size, self.nchannels, self.ny, self.nx)
         return batch_canvas
+
+@READERS.register_module
+class FastPillarFeatureNet(nn.Module):
+    def __init__(
+        self,
+        num_input_features=4,
+        num_filters=(64,),
+        with_distance=False,
+        voxel_size=(0.2, 0.2, 4),
+        pc_range=(0, -40, -3, 70.4, 40, 1),
+        norm_cfg=None,
+        virtual=False
+    ):
+        """
+        FastPillars version of the Pillar Feature Net using MAPE.
+        """
+        super().__init__()
+        self.name = "FastPillarFeatureNet"
+        assert len(num_filters) > 0
+
+        self.num_input = num_input_features
+        num_input_features += 5
+        if with_distance:
+            num_input_features += 1
+        self._with_distance = with_distance
+
+        # Create FastPillars layers
+        num_filters = [num_input_features] + list(num_filters)
+        pfn_layers = []
+        for i in range(len(num_filters) - 1):
+            in_filters = num_filters[i]
+            out_filters = num_filters[i + 1]
+            
+            # Intermediate layers use standard PFN
+            if i < len(num_filters) - 2:
+                pfn_layers.append(
+                    PFNLayer(in_filters, out_filters, norm_cfg=norm_cfg, last_layer=False)
+                )
+            # Final layer uses MAPE Attention
+            else:
+                pfn_layers.append(
+                    MAPELayer(in_filters, out_filters)
+                )
+                
+        self.pfn_layers = nn.ModuleList(pfn_layers)
+
+        self.virtual = virtual 
+
+        # Need pillar (voxel) size and x/y offset in order to calculate pillar offset
+        self.vx = voxel_size[0]
+        self.vy = voxel_size[1]
+        self.x_offset = self.vx / 2 + pc_range[0]
+        self.y_offset = self.vy / 2 + pc_range[1]
+
+    def forward(self, features, num_voxels, coors):
+        device = features.device
+
+        if self.virtual:
+            virtual_point_mask = features[..., -2] == -1
+            virtual_points = features[virtual_point_mask]
+            virtual_points[..., -2] = 1
+            features[..., -2] = 0 
+            features[virtual_point_mask] = virtual_points
+
+        dtype = features.dtype
+        # Find distance of x, y, and z from cluster center
+        points_mean = features[:, :, :3].sum(dim=1, keepdim=True) / num_voxels.type_as(
+            features
+        ).view(-1, 1, 1)
+        f_cluster = features[:, :, :3] - points_mean
+
+        # Find distance of x, y, and z from pillar center
+        f_center = torch.zeros_like(features[:, :, :2])
+        f_center[:, :, 0] = features[:, :, 0] - (
+            coors[:, 3].to(dtype).unsqueeze(1) * self.vx + self.x_offset
+        )
+        f_center[:, :, 1] = features[:, :, 1] - (
+            coors[:, 2].to(dtype).unsqueeze(1) * self.vy + self.y_offset
+        )
+
+        # Combine together feature decorations
+        features_ls = [features, f_cluster, f_center]
+        if self._with_distance:
+            points_dist = torch.norm(features[:, :, :3], 2, 2, keepdim=True)
+            features_ls.append(points_dist)
+        features = torch.cat(features_ls, dim=-1)
+
+        # The feature decorations were calculated without regard to whether pillar was empty
+        voxel_count = features.shape[1]
+        mask = get_paddings_indicator(num_voxels, voxel_count, axis=0)
+        mask = torch.unsqueeze(mask, -1).type_as(features)
+        features *= mask
+
+        # Forward pass through layers
+        for pfn in self.pfn_layers:
+            features = pfn(features)
+
+        return features.squeeze()

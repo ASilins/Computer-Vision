@@ -1,4 +1,4 @@
-from .pillar_encoder import PillarFeatureNet, PointPillarsScatter
+from .pillar_encoder import PillarFeatureNet, PointPillarsScatter, FastPillarFeatureNet
 from .voxel_encoder import VoxelFeatureExtractorV3
 from .dynamic_voxel_encoder import DynamicVoxelEncoder
 
