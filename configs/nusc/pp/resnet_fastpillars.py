@@ -9,10 +9,12 @@ print(f"Found ENV: {load_dotenv()}")
 samples_per_gpu = int(os.getenv("GPU_SAMPLES", 2))
 workers_per_gpu = int(os.getenv("GPU_WORKERS", 4))
 gpu_ids = os.getenv("SELECTED_GPUS", "0")
+use_subset = os.getenv("USE_SUBSET", "True").lower() in ("true", "1", "yes")
 
 print(f"Samples per gpu: {samples_per_gpu}")
 print(f"Workers per gpu: {workers_per_gpu}")
 print(f"Using GPUs: {gpu_ids}")
+print(f"Using {'subset' if use_subset else 'full'}")
 
 tasks = [
     dict(num_class=1, class_names=["car"]),
@@ -169,9 +171,18 @@ test_pipeline = [
     dict(type="Reformat"),
 ]
 
-train_anno = f"{data_root}/infos_train_10sweeps_withvelo_filter_True.pkl"
-val_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True.pkl"
-test_anno = None
+if use_subset:
+    train_anno = f"{data_root}/infos_train_10sweeps_withvelo_filter_True_subset_10.pkl"
+else:
+    train_anno = f"{data_root}/infos_train_10sweeps_withvelo_filter_True.pkl"
+
+if use_subset:
+    val_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True.pkl"
+else:
+    val_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True_subset_10.pkl"
+
+test_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True.pkl"
+
 
 data = dict(
     samples_per_gpu=samples_per_gpu,

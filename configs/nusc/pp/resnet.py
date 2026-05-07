@@ -1,3 +1,4 @@
+import os
 import itertools
 import logging
 from det3d.utils.config_tool import get_downsample_factor
@@ -8,10 +9,12 @@ print(f"Found ENV: {load_dotenv()}")
 samples_per_gpu = int(os.getenv("GPU_SAMPLES", 2))
 workers_per_gpu = int(os.getenv("GPU_WORKERS", 4))
 gpu_ids = os.getenv("SELECTED_GPUS", "0")
+use_subset = os.getenv("USE_SUBSET", "True").lower() in ("true", "1", "yes")
 
 print(f"Samples per gpu: {samples_per_gpu}")
 print(f"Workers per gpu: {workers_per_gpu}")
 print(f"Using GPUs: {gpu_ids}")
+print(f"Using {'subset' if use_subset else 'full'}")
 
 tasks = [
     dict(num_class=1, class_names=["car"]),
@@ -44,17 +47,16 @@ model = dict(
     ),
     backbone=dict(type="PointPillarsScatter", ds_factor=1),
     neck=dict(
-        type="RPN",
-        layer_nums=[3, 5, 5],
+        type="ResNetNeck",
+        layer_nums=[2, 2, 2],
         ds_layer_strides=[2, 2, 2],
         ds_num_filters=[64, 128, 256],
         us_layer_strides=[0.5, 1, 2],
         us_num_filters=[128, 128, 128],
         num_input_features=64,
-        logger=logging.getLogger("RPN"),
+        logger=logging.getLogger("ResNetNeck"),
     ),
     bbox_head=dict(
-        # type='RPNHead',
         type="CenterHead",
         in_channels=sum([128, 128, 128]),
         tasks=tasks,
@@ -93,12 +95,12 @@ test_cfg = dict(
 # dataset settings
 dataset_type = "NuScenesDataset"
 nsweeps = 10
-data_root = "data/nuScenes"
+data_root = os.environ.get("NUSCENES_DATA_ROOT", "data/nuScenes")
 
 db_sampler = dict(
     type="GT-AUG",
     enable=False,
-    db_info_path="data/nuScenes/dbinfos_train_10sweeps_withvelo.pkl",
+    db_info_path=f"{data_root}/dbinfos_train_10sweeps_withvelo.pkl",
     sample_groups=[
         dict(car=2),
         dict(truck=3),
@@ -169,9 +171,18 @@ test_pipeline = [
     dict(type="Reformat"),
 ]
 
-train_anno = f"{data_root}/infos_train_10sweeps_withvelo_filter_True_subset_10.pkl"
-val_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True.pkl"
+if use_subset:
+    train_anno = f"{data_root}/infos_train_10sweeps_withvelo_filter_True_subset_10.pkl"
+else:
+    train_anno = f"{data_root}/infos_train_10sweeps_withvelo_filter_True.pkl"
+
+if use_subset:
+    val_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True.pkl"
+else:
+    val_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True_subset_10.pkl"
+
 test_anno = f"{data_root}/infos_val_10sweeps_withvelo_filter_True.pkl"
+
 
 data = dict(
     samples_per_gpu=samples_per_gpu,
