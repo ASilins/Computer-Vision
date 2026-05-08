@@ -31,7 +31,7 @@ class TextLoggerHook(LoggerHook):
         return mem_mb.item()
 
     def _format_metric_value(self, metric_name, val):
-        precision = 6 if metric_name == "hm_kd_loss" else 4
+        precision = 6 if metric_name in ("hm_kd_loss", "feat_kd_loss") else 4
         if isinstance(val, float):
             val = f"{val:.{precision}f}"
         elif isinstance(val, list):

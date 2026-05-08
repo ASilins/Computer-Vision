@@ -252,9 +252,13 @@ class CenterHead(nn.Module):
         teacher_preds_dicts = kwargs.get("teacher_preds_dicts")
         kd_cfg = kwargs.get("kd_cfg")
         kd_enabled = bool(kd_cfg and kd_cfg.get("enabled", False))
+        kd_type = (kd_cfg.get("type", "heatmap_mse") if kd_cfg else "heatmap_mse")
         kd_weight = float(kd_cfg.get("lambda_kd", 0.0)) if kd_enabled else 0.0
+        lambda_feat = float(kd_cfg.get("lambda_feat", 0.0)) if kd_enabled else 0.0
+        student_feats = kwargs.get("student_feats") or {}
+        teacher_feats = kwargs.get("teacher_feats") or {}
 
-        if kd_enabled:
+        if kd_enabled and kd_type == "heatmap_mse":
             if teacher_preds_dicts is None:
                 raise ValueError("KD is enabled but teacher_preds_dicts is None.")
             if len(teacher_preds_dicts) != len(preds_dicts):
@@ -262,6 +266,29 @@ class CenterHead(nn.Module):
                     "Teacher/student task count mismatch: "
                     f"{len(teacher_preds_dicts)} vs {len(preds_dicts)}"
                 )
+
+        feat_kd_loss = None
+        if kd_enabled and kd_type == "feature_mse" and lambda_feat > 0.0:
+            if "head_shared" not in student_feats or "head_shared" not in teacher_feats:
+                raise ValueError(
+                    "feature_mse KD requires student_feats['head_shared'] and "
+                    "teacher_feats['head_shared']."
+                )
+            s_feat = student_feats["head_shared"]
+            t_feat = teacher_feats["head_shared"].detach()
+            if s_feat.shape[2:] != t_feat.shape[2:]:
+                s_feat = F.interpolate(
+                    s_feat,
+                    size=t_feat.shape[2:],
+                    mode="bilinear",
+                    align_corners=False,
+                )
+            if s_feat.shape != t_feat.shape:
+                raise ValueError(
+                    "Teacher/student head_shared shape mismatch after align: "
+                    f"{s_feat.shape} vs {t_feat.shape}"
+                )
+            feat_kd_loss = F.mse_loss(s_feat, t_feat)
 
         rets = []
         for task_id, preds_dict in enumerate(preds_dicts):
@@ -292,7 +319,7 @@ class CenterHead(nn.Module):
 
             loss = hm_loss + self.weight*loc_loss
             hm_kd_loss = loss.new_tensor(0.0)
-            if kd_enabled and kd_weight > 0.0:
+            if kd_enabled and kd_type == "heatmap_mse" and kd_weight > 0.0:
                 teacher_hm = teacher_preds_dicts[task_id]['hm']
                 if teacher_hm.shape != preds_dict['hm'].shape:
                     raise ValueError(
@@ -305,7 +332,22 @@ class CenterHead(nn.Module):
                 hm_kd_loss = F.mse_loss(preds_dict['hm'], teacher_hm_prob)
                 loss = loss + kd_weight * hm_kd_loss
 
-            ret.update({'loss': loss, 'hm_loss': hm_loss.detach().cpu(), 'loc_loss':loc_loss, 'loc_loss_elem': box_loss.detach().cpu(), 'hm_kd_loss': hm_kd_loss.detach().cpu(), 'num_positive': example['mask'][task_id].float().sum()})
+            if (
+                task_id == 0
+                and kd_enabled
+                and kd_type == "feature_mse"
+                and lambda_feat > 0.0
+                and feat_kd_loss is not None
+            ):
+                loss = loss + lambda_feat * feat_kd_loss
+
+            feat_kd_loss_log = (
+                feat_kd_loss.detach().cpu()
+                if feat_kd_loss is not None
+                else torch.tensor(0.0)
+            )
+
+            ret.update({'loss': loss, 'hm_loss': hm_loss.detach().cpu(), 'loc_loss':loc_loss, 'loc_loss_elem': box_loss.detach().cpu(), 'hm_kd_loss': hm_kd_loss.detach().cpu(), 'feat_kd_loss': feat_kd_loss_log, 'num_positive': example['mask'][task_id].float().sum()})
 
             rets.append(ret)
         

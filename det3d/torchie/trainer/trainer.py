@@ -369,17 +369,29 @@ class Trainer(object):
             kd_cfg = kwargs.get("kd_cfg")
             kd_enabled = bool(kd_cfg and kd_cfg.get("enabled", False))
             teacher_preds_dicts = None
+            teacher_feats = None
+            kd_type = kd_cfg.get("type", "heatmap_mse") if kd_cfg else "heatmap_mse"
 
             if teacher_model is not None and kd_enabled:
                 with torch.no_grad():
-                    teacher_preds_dicts = teacher_model(
-                        example, return_loss=True, return_preds=True
-                    )
+                    if kd_type == "feature_mse":
+                        teacher_out = teacher_model(
+                            example,
+                            return_loss=True,
+                            return_preds=True,
+                            return_feats=True,
+                        )
+                        teacher_feats = teacher_out["feats"]
+                    else:
+                        teacher_preds_dicts = teacher_model(
+                            example, return_loss=True, return_preds=True
+                        )
 
             losses = model(
                 example,
                 return_loss=True,
                 teacher_preds_dicts=teacher_preds_dicts,
+                teacher_feats=teacher_feats,
                 kd_cfg=kd_cfg,
             )
             self.call_hook("after_forward")

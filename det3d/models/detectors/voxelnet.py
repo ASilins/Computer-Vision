@@ -54,10 +54,15 @@ class VoxelNet(SingleStageDetector):
 
     def forward(self, example, return_loss=True, **kwargs):
         x, _ = self.extract_feat(example)
-        preds, _ = self.bbox_head(x)
+        preds, head_shared = self.bbox_head(x)
 
         if return_loss:
             if kwargs.get("return_preds", False):
+                if kwargs.get("return_feats", False):
+                    return {
+                        "preds": preds,
+                        "feats": {"head_shared": head_shared},
+                    }
                 return preds
             return self.bbox_head.loss(
                 example,
@@ -65,6 +70,8 @@ class VoxelNet(SingleStageDetector):
                 self.test_cfg,
                 teacher_preds_dicts=kwargs.get("teacher_preds_dicts"),
                 kd_cfg=kwargs.get("kd_cfg"),
+                student_feats={"head_shared": head_shared},
+                teacher_feats=kwargs.get("teacher_feats"),
             )
         else:
             return self.bbox_head.predict(example, preds, self.test_cfg)
