@@ -30,11 +30,12 @@ class TextLoggerHook(LoggerHook):
             dist.reduce(mem_mb, 0, op=dist.ReduceOp.MAX)
         return mem_mb.item()
 
-    def _convert_to_precision4(self, val):
+    def _format_metric_value(self, metric_name, val):
+        precision = 6 if metric_name == "hm_kd_loss" else 4
         if isinstance(val, float):
-            val = "{:.4f}".format(val)
+            val = f"{val:.{precision}f}"
         elif isinstance(val, list):
-            val = [self._convert_to_precision4(v) for v in val]
+            val = [self._format_metric_value(metric_name, v) for v in val]
 
         return val
 
@@ -95,11 +96,11 @@ class TextLoggerHook(LoggerHook):
                     continue
 
                 if isinstance(val, float):
-                    val = "{:.4f}".format(val)
+                    val = self._format_metric_value(name, val)
 
                 if isinstance(val, list):
                     log_items.append(
-                        "{}: {}".format(name, self._convert_to_precision4(val[idx]))
+                        "{}: {}".format(name, self._format_metric_value(name, val[idx]))
                     )
                 else:
                     log_items.append("{}: {}".format(name, val))
