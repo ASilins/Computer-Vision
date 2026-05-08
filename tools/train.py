@@ -71,6 +71,9 @@ def main():
 
     cfg = Config.fromfile(args.config)
 
+    if not hasattr(cfg, "gpus") or cfg.gpus is None:
+        cfg.gpus = args.gpus
+
     # update configs according to CLI args
     if args.work_dir is not None:
         cfg.work_dir = args.work_dir
@@ -83,8 +86,11 @@ def main():
 
     if distributed:
         if args.launcher == "pytorch":
-            torch.cuda.set_device(args.local_rank)
-            torch.distributed.init_process_group(backend="nccl", init_method="env://")
+            if torch.cuda.is_available():
+                torch.cuda.set_device(args.local_rank)
+                torch.distributed.init_process_group(backend="nccl", init_method="env://")
+            else:
+                torch.distributed.init_process_group(backend="gloo", init_method="env://")
             cfg.local_rank = args.local_rank
         elif args.launcher == "slurm":
             proc_id = int(os.environ["SLURM_PROCID"])

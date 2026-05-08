@@ -43,8 +43,12 @@ from typing import Set
 
 try:
     import spconv.pytorch as spconv
-except:
-    import spconv as spconv
+except Exception:
+    try:
+        import spconv as spconv
+    except Exception:
+        spconv = None
+
 
 def find_all_spconv_keys(model: nn.Module, prefix="") -> Set[str]:
     """
@@ -52,6 +56,8 @@ def find_all_spconv_keys(model: nn.Module, prefix="") -> Set[str]:
     from https://github.com/acivgin1/OpenPCDet/blob/8fc1a5d57bcb418d71d5118fb3df4b58d4ea0244/pcdet/utils/spconv_utils.py
     """
     found_keys: Set[str] = set()
+    if spconv is None:
+        return found_keys
     for name, child in model.named_children():
         new_prefix = f"{prefix}.{name}" if prefix != "" else name
 

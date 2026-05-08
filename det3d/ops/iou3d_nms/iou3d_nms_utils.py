@@ -5,7 +5,10 @@ All Rights Reserved 2019-2020.
 """
 import torch
 
-from . import iou3d_nms_cuda
+try:
+    from . import iou3d_nms_cuda
+except Exception:
+    iou3d_nms_cuda = None
 import numpy as np 
 
 

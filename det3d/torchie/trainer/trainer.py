@@ -147,6 +147,7 @@ class Trainer(object):
         work_dir=None,
         log_level=logging.INFO,
         logger=None,
+        train_device=None,
         **kwargs,
     ):
         assert callable(batch_processor)
@@ -155,6 +156,11 @@ class Trainer(object):
         self.lr_scheduler = lr_scheduler
 
         self.batch_processor = batch_processor
+        self.train_device = (
+            train_device
+            if train_device is not None
+            else (torch.device("cuda", 0) if torch.cuda.is_available() else torch.device("cpu"))
+        )
 
         # Create work_dir
         if torchie.is_str(work_dir):
@@ -351,20 +357,31 @@ class Trainer(object):
 
     def batch_processor_inline(self, model, data, train_mode, **kwargs):
 
-        if "local_rank" in kwargs:
-            device = torch.device(kwargs["local_rank"])
-        else:
-            device = None
+        device = kwargs.get("train_device", self.train_device)
 
         # data = example_convert_to_torch(data, device=device)
-        example = example_to_device(
-            data, torch.cuda.current_device(), non_blocking=False
-        )
+        example = example_to_device(data, device, non_blocking=False)
 
         self.call_hook("after_data_to_device")
 
         if train_mode:
-            losses = model(example, return_loss=True)
+            teacher_model = kwargs.get("teacher_model")
+            kd_cfg = kwargs.get("kd_cfg")
+            kd_enabled = bool(kd_cfg and kd_cfg.get("enabled", False))
+            teacher_preds_dicts = None
+
+            if teacher_model is not None and kd_enabled:
+                with torch.no_grad():
+                    teacher_preds_dicts = teacher_model(
+                        example, return_loss=True, return_preds=True
+                    )
+
+            losses = model(
+                example,
+                return_loss=True,
+                teacher_preds_dicts=teacher_preds_dicts,
+                kd_cfg=kd_cfg,
+            )
             self.call_hook("after_forward")
             loss, log_vars = parse_second_losses(losses)
             del losses
@@ -480,9 +497,15 @@ class Trainer(object):
 
     def resume(self, checkpoint, resume_optimizer=True, map_location="default"):
         if map_location == "default":
-            checkpoint = self.load_checkpoint(
-                checkpoint , map_location='cuda:{}'.format(torch.cuda.current_device()) # TODO: FIX THIS!!
-            )
+            if torch.cuda.is_available():
+                loc = "cuda:{}".format(torch.cuda.current_device())
+            else:
+                loc = (
+                    self.train_device
+                    if isinstance(self.train_device, str)
+                    else str(self.train_device)
+                )
+            checkpoint = self.load_checkpoint(checkpoint, map_location=loc)
         else:
             checkpoint = self.load_checkpoint(checkpoint, map_location=map_location)
 

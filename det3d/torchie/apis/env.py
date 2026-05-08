@@ -10,6 +10,18 @@ import torch.multiprocessing as mp
 from det3d.torchie.trainer import get_dist_info
 
 
+def get_train_device(local_rank=0):
+    """Pick training device: CUDA (per rank) if available, else CPU."""
+    forced = os.environ.get("CENTERPOINT_DEVICE", "").strip().lower()
+    if forced in ("cpu", "cuda"):
+        if forced == "cuda" and torch.cuda.is_available():
+            return torch.device("cuda", int(local_rank))
+        return torch.device("cpu")
+    if torch.cuda.is_available():
+        return torch.device("cuda", int(local_rank))
+    return torch.device("cpu")
+
+
 def init_dist(launcher, backend="nccl", **kwargs):
     if mp.get_start_method(allow_none=True) is None:
         mp.set_start_method("spawn")
@@ -52,7 +64,8 @@ def set_random_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def get_root_logger(log_level=logging.INFO):

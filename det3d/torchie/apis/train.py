@@ -12,17 +12,24 @@ except:
 import numpy as np
 import torch
 from det3d.builder import _create_learning_rate_scheduler
+from det3d.models import build_detector
 
 # from det3d.datasets.kitti.eval_hooks import KittiDistEvalmAPHook, KittiEvalmAPHookV2
 from det3d.core import DistOptimizerHook
 from det3d.datasets import DATASETS, build_dataloader
 from det3d.solver.fastai_optim import OptimWrapper
-from det3d.torchie.trainer import DistSamplerSeedHook, Trainer, obj_from_dict
+from det3d.torchie import Config
+from det3d.torchie.trainer import (
+    DistSamplerSeedHook,
+    Trainer,
+    load_checkpoint,
+    obj_from_dict,
+)
 from det3d.utils.print_utils import metric_to_str
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 
-from .env import get_root_logger
+from .env import get_root_logger, get_train_device
 
 
 def example_to_device(example, device=None, non_blocking=False) -> dict:
@@ -91,10 +98,13 @@ def parse_second_losses(losses):
 
 def batch_processor(model, data, train_mode, **kwargs):
 
-    if "local_rank" in kwargs:
-        device = torch.device(kwargs["local_rank"])
-    else:
-        device = None
+    device = kwargs.get("train_device")
+    if device is None:
+        if torch.cuda.is_available():
+            lr = int(kwargs.get("local_rank", 0))
+            device = torch.device("cuda", lr)
+        else:
+            device = torch.device("cpu")
 
     # data = example_convert_to_torch(data, device=device)
     example = example_to_device(data, device, non_blocking=False)
@@ -159,7 +169,7 @@ def build_one_cycle_optimizer(model, optimizer_config):
             torch.optim.Adam, betas=(0.9, 0.99), amsgrad=optimizer_config.amsgrad
         )
     else:
-        optimizer_func = partial(torch.optim.Adam, amsgrad=optimizer_cfg.amsgrad)
+        optimizer_func = partial(torch.optim.Adam, amsgrad=optimizer_config.amsgrad)
 
     optimizer = OptimWrapper.create(
         optimizer_func,
@@ -252,6 +262,9 @@ def train_detector(model, dataset, cfg, distributed=False, validate=False, logge
     if logger is None:
         logger = get_root_logger(cfg.log_level)
 
+    train_device = get_train_device(cfg.local_rank if distributed else 0)
+    logger.info("Training device: %s", train_device)
+
     # start training
     # prepare data loaders
     dataset = dataset if isinstance(dataset, (list, tuple)) else [dataset]
@@ -264,8 +277,11 @@ def train_detector(model, dataset, cfg, distributed=False, validate=False, logge
 
     total_steps = cfg.total_epochs * len(data_loaders[0])
     # print(f"total_steps: {total_steps}")
-    if distributed:
-        model = apex.parallel.convert_syncbn_model(model)
+    if distributed and torch.cuda.is_available():
+        try:
+            model = apex.parallel.convert_syncbn_model(model)
+        except Exception:
+            logger.warning("apex convert_syncbn_model skipped (apex unavailable or incompatible).")
     if cfg.lr_config.type == "one_cycle":
         # build trainer
         optimizer = build_one_cycle_optimizer(model, cfg.optimizer)
@@ -279,22 +295,61 @@ def train_detector(model, dataset, cfg, distributed=False, validate=False, logge
         # lr_scheduler = None
         cfg.lr_config = None 
 
-    # put model on gpus
+    # put model on device (CUDA / CPU)
     if distributed:
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "Distributed training requires CUDA in this codebase. "
+                "Run without torch.distributed (single process) for CPU."
+            )
         model = DistributedDataParallel(
-            model.cuda(cfg.local_rank),
+            model.to(train_device),
             device_ids=[cfg.local_rank],
             output_device=cfg.local_rank,
             # broadcast_buffers=False,
             find_unused_parameters=True,
         )
     else:
-        model = model.cuda()
+        model = model.to(train_device)
 
     logger.info(f"model structure: {model}")
 
+    kd_cfg = cfg.get("kd", None)
+    kd_enabled = bool(kd_cfg and kd_cfg.get("enabled", False))
+    teacher_model = None
+    if kd_enabled:
+        teacher_cfg_path = kd_cfg.get("teacher_config", None)
+        teacher_ckpt_path = kd_cfg.get("teacher_checkpoint", None)
+        if not teacher_ckpt_path:
+            raise ValueError("KD is enabled but kd.teacher_checkpoint is not set.")
+
+        if teacher_cfg_path:
+            teacher_cfg = Config.fromfile(teacher_cfg_path)
+            teacher_model_cfg = teacher_cfg.model
+            teacher_train_cfg = teacher_cfg.train_cfg
+            teacher_test_cfg = teacher_cfg.test_cfg
+        else:
+            teacher_model_cfg = cfg.model
+            teacher_train_cfg = cfg.train_cfg
+            teacher_test_cfg = cfg.test_cfg
+
+        teacher_model = build_detector(
+            teacher_model_cfg, train_cfg=teacher_train_cfg, test_cfg=teacher_test_cfg
+        )
+        teacher_model = teacher_model.to(train_device)
+        load_checkpoint(teacher_model, teacher_ckpt_path, map_location=str(train_device))
+        teacher_model.eval()
+        teacher_model.requires_grad_(False)
+        logger.info("KD enabled with teacher checkpoint: %s", teacher_ckpt_path)
+
     trainer = Trainer(
-        model, batch_processor, optimizer, lr_scheduler, cfg.work_dir, cfg.log_level
+        model,
+        batch_processor,
+        optimizer,
+        lr_scheduler,
+        cfg.work_dir,
+        cfg.log_level,
+        train_device=train_device,
     )
 
     if distributed:
@@ -323,4 +378,12 @@ def train_detector(model, dataset, cfg, distributed=False, validate=False, logge
     elif cfg.load_from:
         trainer.load_checkpoint(cfg.load_from)
 
-    trainer.run(data_loaders, cfg.workflow, cfg.total_epochs, local_rank=cfg.local_rank)
+    trainer.run(
+        data_loaders,
+        cfg.workflow,
+        cfg.total_epochs,
+        local_rank=cfg.local_rank,
+        train_device=train_device,
+        teacher_model=teacher_model,
+        kd_cfg=kd_cfg,
+    )

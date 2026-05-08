@@ -9,6 +9,7 @@ import logging
 from collections import defaultdict
 from det3d.core import box_torch_ops
 import torch
+import torch.nn.functional as F
 from det3d.torchie.cnn import kaiming_init
 from torch import double, nn
 from det3d.models.losses.centernet_loss import FastFocalLoss, RegLoss
@@ -248,6 +249,20 @@ class CenterHead(nn.Module):
         return y
 
     def loss(self, example, preds_dicts, test_cfg, **kwargs):
+        teacher_preds_dicts = kwargs.get("teacher_preds_dicts")
+        kd_cfg = kwargs.get("kd_cfg")
+        kd_enabled = bool(kd_cfg and kd_cfg.get("enabled", False))
+        kd_weight = float(kd_cfg.get("lambda_kd", 0.0)) if kd_enabled else 0.0
+
+        if kd_enabled:
+            if teacher_preds_dicts is None:
+                raise ValueError("KD is enabled but teacher_preds_dicts is None.")
+            if len(teacher_preds_dicts) != len(preds_dicts):
+                raise ValueError(
+                    "Teacher/student task count mismatch: "
+                    f"{len(teacher_preds_dicts)} vs {len(preds_dicts)}"
+                )
+
         rets = []
         for task_id, preds_dict in enumerate(preds_dicts):
             # heatmap focal loss
@@ -276,8 +291,21 @@ class CenterHead(nn.Module):
             loc_loss = (box_loss*box_loss.new_tensor(self.code_weights)).sum()
 
             loss = hm_loss + self.weight*loc_loss
+            hm_kd_loss = loss.new_tensor(0.0)
+            if kd_enabled and kd_weight > 0.0:
+                teacher_hm = teacher_preds_dicts[task_id]['hm']
+                if teacher_hm.shape != preds_dict['hm'].shape:
+                    raise ValueError(
+                        "Teacher/student hm shape mismatch at task "
+                        f"{task_id}: {teacher_hm.shape} vs {preds_dict['hm'].shape}"
+                    )
+                teacher_hm_prob = torch.clamp(
+                    torch.sigmoid(teacher_hm.detach()), min=1e-4, max=1 - 1e-4
+                )
+                hm_kd_loss = F.mse_loss(preds_dict['hm'], teacher_hm_prob)
+                loss = loss + kd_weight * hm_kd_loss
 
-            ret.update({'loss': loss, 'hm_loss': hm_loss.detach().cpu(), 'loc_loss':loc_loss, 'loc_loss_elem': box_loss.detach().cpu(), 'num_positive': example['mask'][task_id].float().sum()})
+            ret.update({'loss': loss, 'hm_loss': hm_loss.detach().cpu(), 'loc_loss':loc_loss, 'loc_loss_elem': box_loss.detach().cpu(), 'hm_kd_loss': hm_kd_loss.detach().cpu(), 'num_positive': example['mask'][task_id].float().sum()})
 
             rets.append(ret)
         

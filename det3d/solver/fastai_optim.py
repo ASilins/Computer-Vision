@@ -1,4 +1,9 @@
-from collections import Iterable, defaultdict
+from collections import defaultdict
+
+try:
+    from collections.abc import Iterable
+except ImportError:
+    from collections import Iterable
 from copy import deepcopy
 from itertools import chain
 

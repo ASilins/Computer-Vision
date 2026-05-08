@@ -10,13 +10,13 @@ class EmptyCacheHook(Hook):
         self._after_iter = after_iter
 
     def after_iter(self, trainer):
-        if self._after_iter:
+        if self._after_iter and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
     def before_epoch(self, trainer):
-        if self._before_epoch:
+        if self._before_epoch and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
     def after_epoch(self, trainer):
-        if self._after_epoch:
+        if self._after_epoch and torch.cuda.is_available():
             torch.cuda.empty_cache()

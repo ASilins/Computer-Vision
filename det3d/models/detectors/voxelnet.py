@@ -57,7 +57,15 @@ class VoxelNet(SingleStageDetector):
         preds, _ = self.bbox_head(x)
 
         if return_loss:
-            return self.bbox_head.loss(example, preds, self.test_cfg)
+            if kwargs.get("return_preds", False):
+                return preds
+            return self.bbox_head.loss(
+                example,
+                preds,
+                self.test_cfg,
+                teacher_preds_dicts=kwargs.get("teacher_preds_dicts"),
+                kd_cfg=kwargs.get("kd_cfg"),
+            )
         else:
             return self.bbox_head.predict(example, preds, self.test_cfg)
 
